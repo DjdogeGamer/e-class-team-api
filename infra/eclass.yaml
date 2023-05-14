@@ -1,0 +1,220 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: ECR repositories
+
+Resources:
+  
+  ECLASSCLUSTER:
+    Type: AWS::ECS::Cluster
+    Properties:
+      CapacityProviders: 
+        - FARGATE
+      ClusterName: instacar-ecs-cluster
+      ClusterSettings:
+        - Name: containerInsights
+          Value:  enabled
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE 
+          Weight: 1
+  
+  instacar:
+    Properties:
+      EncryptionConfiguration:
+        EncryptionType: AES256
+      RepositoryName: instacar
+    Type: AWS::ECR::Repository
+
+  HTTPOnly:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'Security group that allows only HTTP traffic'
+      GroupName: HTTPOnly
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: '0.0.0.0/0'
+      VpcId: vpc-00d6909bf8762f4d6
+  
+  ECLASSALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: ECLASSALB
+      Scheme: internet-facing
+      Type: "application"
+      Subnets:
+        - subnet-0d5302971f4d3e237
+        - subnet-0a406934d5e354586
+      SecurityGroups:
+        - !Ref HTTPOnly
+      IpAddressType: ipv4
+      LoadBalancerAttributes:
+        - Key: 'idle_timeout.timeout_seconds'
+          Value: '300'
+
+  ECLASSALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            ContentType: text/plain
+            MessageBody: "Host not found"
+            StatusCode: 404
+      LoadBalancerArn: !Ref ECLASSALB
+      Port: 80
+      Protocol: HTTP
+  
+  ECLASSBUCKET:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: eclass-instacar
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Team
+          Value: ECLASS
+  
+  InstacarRole:
+    DependsOn: ECLASSBUCKET
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - sts:AssumeRole
+              - sts:TagSession
+            Condition:
+              ForAnyValue:StringLike:
+                aws:PrincipalServiceName:
+                  - ecs-tasks.amazonaws.com
+            Effect: Allow
+            Principal:
+              AWS: '*'
+            Sid: 0
+        Version: "2012-10-17"
+      Description: IAM Role to Instacar Service
+      Path: /
+      Policies:
+        - PolicyDocument:
+            Statement:
+              - Action:
+                  - s3:PutObject
+                  - s3:ListBucket
+                  - s3:GetObject
+                  - s3:DeleteObject
+                  - s3:GetBucketLocation
+                Effect: Allow
+                Resource:
+                  - arn:aws:s3:::eclass-instacar
+                  - arn:aws:s3:::eclass-instacar/*
+                Sid: S3BucketAccess
+              - Action:
+                  - secretsmanager:*
+                Effect: Allow
+                Resource:
+                  - arn:aws:secretsmanager:eu-west-1:600684781111:secret:eclass-auth*
+                Sid: SecretManagerAccess
+              - Action:
+                  - iam:PassRole
+                Effect: Allow
+                Resource:
+                  - '*'
+                Sid: IAMPassRole
+              - Action:
+                  - log:createLogStream
+                Effect: Allow
+                Resource:
+                  - arn:aws:logs:us-east-1:600684781111:log-group:/ecs/containers/instacar/*
+                Sid: CloudWatchLogs
+            Version: "2012-10-17"
+          PolicyName: InstacarRole
+      RoleName: InstacarRole
+      Tags:
+        - Key: Name
+          Value: InstacarRole
+    Type: AWS::IAM::Role
+
+  ECLASSExecutionRole:
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - sts:AssumeRole
+              - sts:TagSession
+            Condition:
+              ForAnyValue:StringLike:
+                aws:PrincipalServiceName:
+                  - ecs-tasks.amazonaws.com
+            Effect: Allow
+            Principal:
+              AWS: '*'
+            Sid: 0
+        Version: "2012-10-17"
+      Description: IAM Role to Instacar Service
+      Path: /
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+      RoleName: ECLASSExecutionRole
+      Tags:
+        - Key: Name
+          Value: ECLASSExecutionRole
+    Type: AWS::IAM::Role
+
+Outputs:
+
+  InstacarRoleArn:
+    Description: Instacar service role Arn
+    Export:
+      Name:
+        Fn::Sub: ${AWS::StackName}-InstacarRoleArn
+    Value: arn:aws:iam::600684781111:role/InstacarRole
+  
+  ECLASSExecutionRole:
+    Description: Task Execution service role Arn
+    Export:
+      Name: DefaultECSTaskExecutionRoleArn
+    Value: arn:aws:iam::600684781111:role/ECLASSExecutionRole
+  
+  ECLASSALBFullName:
+    Description: ECLASS ALB Full Name
+    Value: !GetAtt ECLASSALB.LoadBalancerFullName
+    Export:
+      Name: !Sub ${AWS::StackName}-ECLASSALB-FullName
+
+  ECLASSALBArn:
+    Description: ECLASS ALB Arn
+    Value: !Ref ECLASSALB
+    Export:
+      Name: !Sub ${AWS::StackName}-ECLASSALB-Arn
+
+  ECLASSALBHostname:
+    Description: ECLASS ALB hostname
+    Value: !GetAtt ECLASSALB.DNSName
+    Export:
+      Name: !Sub ${AWS::StackName}-ECLASSALB-Hostname
+
+  ECLASSALBHostedZone:
+    Description: ECLASS ALB Hosted Zone ID
+    Value: !GetAtt ECLASSALB.CanonicalHostedZoneID
+    Export:
+      Name: !Sub ${AWS::StackName}-ECLASSALB-HostedZoneId
+
+  HTTPOnly:
+    Description: Security Group with rule for HTTP only traffic
+    Value: !GetAtt HTTPOnly.GroupId
+    Export:
+      Name: !Sub ${AWS::StackName}-HTTPOnly
+
+  ECLASSALBListenerArn:
+    Description: Arn for ECLASS ALB listener
+    Value: !Ref ECLASSALBListener
+    Export:
+      Name: !Sub ${AWS::StackName}-ECLASSALBListener-Arn

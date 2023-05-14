@@ -1,0 +1,208 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Template for the ECLASS VPC
+
+Resources:
+  ECLASSVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: eclass-vpc
+
+  ECLASSInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: eclass-igw
+
+  ECLASSGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref ECLASSVPC
+      InternetGatewayId: !Ref ECLASSInternetGateway
+
+  ECLASSPublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref ECLASSVPC
+      CidrBlock: 10.0.0.0/20
+      AvailabilityZone: eu-west-1a
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: eclass-subnet-public1-eu-west-1a
+
+
+  ECLASSPublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref ECLASSVPC
+      CidrBlock: 10.0.16.0/20
+      AvailabilityZone: eu-west-1b
+      Tags:
+        - Key: Name
+          Value: eclass-subnet-public2-eu-west-1b
+
+  ECLASSPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref ECLASSVPC
+      Tags:
+        - Key: Name
+          Value: eclass-rtb-public
+
+  ECLASSPublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: ECLASSGatewayAttachment
+    Properties:
+      RouteTableId: !Ref ECLASSPublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref ECLASSInternetGateway
+
+  ECLASSSubnetAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref ECLASSPublicSubnet1
+      RouteTableId: !Ref ECLASSPublicRouteTable
+  
+  ECLASSSubnetAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref ECLASSPublicSubnet2
+      RouteTableId: !Ref ECLASSPublicRouteTable
+  
+
+  ECLASSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ECLASSSecurityGroup
+      VpcId: !Ref ECLASSVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 10.0.0.0/16
+      Tags:
+        - Key: Name
+          Value: ECLASSSecurityGroup
+
+
+ECLASSPrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref ECLASSVPC
+      CidrBlock: 10.0.128.0/20
+      AvailabilityZone: eu-west-1a
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: eclass-subnet-private1-eu-west-1a
+
+
+  ECLASSPrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref ECLASSVPC
+      CidrBlock: 10.0.144.0/20
+      AvailabilityZone: eu-west-1b
+      Tags:
+        - Key: Name
+          Value: eclass-subnet-private2-eu-west-1b
+
+  ECLASSPrivateRouteTable1:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref ECLASSVPC
+      Tags:
+        - Key: Name
+          Value: eclass-rtb-private1
+
+  ECLASSPrivateRoute1:
+    Type: AWS::EC2::Route
+    DependsOn: ECLASSGatewayAttachment
+    Properties:
+      RouteTableId: !Ref ECLASSPrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref NatGateway1
+      
+  ECLASSPrivateRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref ECLASSVPC
+      Tags:
+        - Key: Name
+          Value: eclass-rtb-private2
+
+  ECLASSPrivateRoute2:
+    Type: AWS::EC2::Route
+    DependsOn: ECLASSGatewayAttachment
+    Properties:
+      RouteTableId: !Ref ECLASSPrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref NatGateway2
+
+  ECLASSSubnetAssociation3:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref ECLASSPrivateSubnet1
+      RouteTableId: !Ref ECLASSPrivateRouteTable1
+  
+  ECLASSSubnetAssociation4:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref ECLASSPrivateSubnet2
+      RouteTableId: !Ref ECLASSPrivateRouteTable2
+  
+  ElasticIP1:
+    Type: AWS::EC2::EIP
+    Condition: EnabledNatGateway
+    Properties:
+      Domain: vpc
+
+  NatGateway1:
+    Type: AWS::EC2::NatGateway
+    Condition: EnabledNatGateway
+    Properties:
+      AllocationId: !GetAtt ElasticIP1.AllocationId
+      SubnetId: !Ref ECLASSPublicSubnet1
+      
+  ElasticIP2:
+    Type: AWS::EC2::EIP
+    Condition: EnabledNatGateway
+    Properties:
+      Domain: vpc
+
+  NatGateway2:
+    Type: AWS::EC2::NatGateway
+    Condition: EnabledNatGateway
+    Properties:
+      AllocationId: !GetAtt ElasticIP2.AllocationId
+      SubnetId: !Ref ECLASSPublicSubnet2
+  
+  ECLASSS3Endpoint1:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: com.amazonaws.us-east-1.s3
+      VpcId: !Ref ECLASSVPC
+      RouteTableIds:
+        - !Ref ECLASSPrivateRouteTable1
+      Tags:
+        - Key: Name
+          Value: ECLASSS3Endpoint1
+  
+  ECLASSS3Endpoint2:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      ServiceName: com.amazonaws.us-east-1.s3
+      VpcId: !Ref ECLASSVPC
+      RouteTableIds:
+        - !Ref ECLASSPrivateRouteTable2
+      Tags:
+        - Key: Name
+          Value: ECLASSS3Endpoint2
+   
+  

@@ -1,0 +1,98 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: RDS instances
+
+Resources:
+  # Subnet Group for RDS instances
+  RDSSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: RDS
+      DBSubnetGroupDescription: Subnet Group for RDS instances
+      SubnetIds:
+        - subnet-0d5302971f4d3e237
+        - subnet-0a406934d5e354586
+  
+
+
+  ECLASSRDSSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group for a Postgres RDS instance deployed within ECLASS VPC
+      GroupName: ECLASSRDSSecurityGroup
+      VpcId:  vpc-00d6909bf8762f4d6
+
+  ECLASSRDSPostgresSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ECLASSRDSSecurityGroup
+      Description: Allow traffic only on port 5432 from IPs within the ECLASS VPC
+      CidrIp: 10.0.0.0/16
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+
+  ECLASSPassword:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: ECLASSPassword
+      Description: ECLASS Postgres RDS instance master ECLASSdentials
+      GenerateSecretString:
+        SecretStringTemplate: '{}'
+        GenerateStringKey: "password"
+        PasswordLength: 15
+        ExcludeCharacters: '"@/'
+      Tags:
+        - Key: Team
+          Value: ECLASS
+
+  ECLASS:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: ECLASS
+      Engine: postgres
+      EngineVersion: 13.3
+      DBInstanceClass: db.m5.xlarge
+      AllocatedStorage: 50
+      MaxAllocatedStorage: 100
+      StorageEncrypted: true
+      StorageType: gp2
+      BackupRetentionPeriod: 30
+      MasterUsername: postgres
+      MasterUserPassword: !Join
+        - ''
+        - - '{{resolve:secretsmanager:'
+          - !Ref ECLASSPassword
+          - ':SecretString:password}}'
+      EnableCloudwatchLogsExports:
+        - postgresql
+        - upgrade
+      EnableIAMDatabaseAuthentication: true
+      EnablePerformanceInsights: true
+      PerformanceInsightsRetentionPeriod: 7
+      Port: 5432
+      DBSubnetGroupName: !Ref RDSSubnetGroup
+      PubliclyAccessible: false
+      VPCSecurityGroups: 
+        - !Ref  ECLASSRDSSecurityGroup
+      PreferredBackupWindow: '05:00-07:00'
+      PreferredMaintenanceWindow: 'Sat:07:01-Sat:11:00'
+    DeletionPolicy: Snapshot
+
+Outputs:
+  ECLASSName:
+    Description: ECLASS Postgres DB Instance Identifier
+    Value: !Ref ECLASS
+    Export:
+      Name: !Sub ${AWS::StackName}-ECLASSName
+
+  ECLASSPostgres:
+    Description: ECLASS Postgres RDS instance hostname
+    Value: !GetAtt ECLASS.Endpoint.Address
+    Export:
+      Name: !Sub ${AWS::StackName}-ECLASS
+
+  ECLASSRDSSecurityGroup:
+    Description: Security Group for ECLASS postgres instances deployed in ECLASS VPC
+    Value: !GetAtt ECLASSRDSSecurityGroup.GroupId
+    Export:
+      Name: !Sub ${AWS::StackName}-ECLASSRDSSecurityGroup

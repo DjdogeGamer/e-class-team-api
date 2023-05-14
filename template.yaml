@@ -1,0 +1,110 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: ECS Tasks & Services
+
+Parameters:
+  ServiceName:
+    Description: A service name to be used as resource prefix
+    Type: String
+    Default: instacar
+  Tag:
+    Description: Image tag to deploy
+    Type: String
+
+
+Resources:
+  
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+       LogGroupName: !Sub "/ecs/containers/${ServiceName}"
+  
+  TaskDefinition:
+    DependsOn:
+      - LogGroup
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Ref ServiceName
+      Cpu: 2048
+      Memory: 4GB
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !ImportValue DefaultECSTaskExecutionRoleArn
+      TaskRoleArn: !ImportValue eclass-InstacarRoleArn
+      ContainerDefinitions:
+        - Name: instacar
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.us-east-1.amazonaws.com/instacar:${Tag}
+          PortMappings:
+            - ContainerPort: 80
+          Environment:
+            - Name: URL
+              Value: eclass.c4md8tfslyqp.eu-west-1.rds.amazonaws.com
+            - Name: INSTACAR_S3_BUCKET
+              Value:  eclass-instacar
+            - Name: DBNAME
+              Value:  "{{resolve:secretsmanager:eclass-auth:SecretString:dbname}}"
+            - Name: USERNAME
+              Value:  "{{resolve:secretsmanager:eclass-auth:SecretString:dbuser}}"
+            - Name: PASSWORD
+              Value:  "{{resolve:secretsmanager:eclass-auth:SecretString:password}}"
+            - Name: AWS_REGION
+              Value: eu-west-1
+            - Name: APP_PORT
+              Value: "80"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-region: !Ref AWS::Region
+              awslogs-group: !Ref LogGroup
+              awslogs-stream-prefix: ecs
+      RequiresCompatibilities:
+        - EC2
+        - FARGATE
+  
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckIntervalSeconds: 300
+      HealthCheckPath: /instacar/health
+      HealthCheckPort: 80
+      HealthCheckTimeoutSeconds: 120
+      UnhealthyThresholdCount: 5
+      Name: instacar-target-group
+      Port: 80
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: vpc-00d6909bf8762f4d6
+  ListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !ImportValue eclass-ECLASSALBListener-Arn
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetGroup
+      Conditions:
+        - Field: path-pattern
+          Values:
+            - /*
+      Priority: 10
+  Service:
+    DependsOn:
+      - TaskDefinition
+      - TargetGroup
+      - ListenerRule
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: instacar
+      Cluster: !ImportValue instacar-ecs-cluster
+      TaskDefinition: !Ref TaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            - subnet-0d5302971f4d3e237
+          SecurityGroups:
+            - !ImportValue HTTPOnly
+      LoadBalancers:
+        - ContainerName: instacar-container
+          ContainerPort: 80
+          TargetGroupArn: !Ref TargetGroup
+ 
